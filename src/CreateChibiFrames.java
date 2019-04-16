@@ -2,6 +2,8 @@
 
 import java.awt.image.BufferedImage;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -15,6 +17,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.zip.Deflater;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+
+import javax.imageio.ImageIO;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -47,6 +51,9 @@ import com.esotericsoftware.spine.attachments.RegionAttachment;
 import com.esotericsoftware.spine.attachments.SkinnedMeshAttachment;
 
 public class CreateChibiFrames extends ApplicationAdapter {
+    public enum Format {
+        PNG, PNG8, PNG32, GIF
+    }
     SkeletonRenderer renderer;
     AnimationState state;
     float delta = 1/30.0f;
@@ -54,7 +61,7 @@ public class CreateChibiFrames extends ApplicationAdapter {
     ThreadPoolExecutor pool;
     CountDownLatch latch;
     int nThreads = 6; //Average number of animations per skeleton
-    boolean lossy = false;
+    Format format = Format.PNG;
     public void create () {
         long start = System.currentTimeMillis();
         latch = new CountDownLatch(Integer.MAX_VALUE);
@@ -113,7 +120,7 @@ public class CreateChibiFrames extends ApplicationAdapter {
         try {
             while(!pool.awaitTermination(Long.MAX_VALUE, TimeUnit.MINUTES)) {
                 latch = new CountDownLatch(pool.getActiveCount());
-                latch.await(4, TimeUnit.SECONDS);
+                latch.await(8, TimeUnit.SECONDS);
             }
         } catch (InterruptedException e) {e.printStackTrace();}
         long end = System.currentTimeMillis();
@@ -267,18 +274,25 @@ public class CreateChibiFrames extends ApplicationAdapter {
             frames.add(pixels);
         }
         pool.execute(new Runnable() {
-            @Override
-                public void run() {
-                    try {
-                        if (lossy) saveWorkLossy(frames, animation.getName(), skeletonData.getName(), maxX, maxY);
-                        else saveWorkLossless(frames, animation.getName(), skeletonData.getName(), maxX, maxY);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    } finally {
-                        latch.countDown();
+            public void run() {
+                try {
+                    switch (format) {
+                    case PNG:
+                    case PNG32: 
+                        saveWorkLossless(frames, animation.getName(), skeletonData.getName(), maxX, maxY);
+                        break;
+                    case GIF:
+                    case PNG8:
+                        saveWorkLossy(frames, animation.getName(), skeletonData.getName(), maxX, maxY);
+                        break;                      
                     }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+                    latch.countDown();
                 }
-            });  
+            }
+        });  
     }
     public void saveWorkLossy(List<byte[]> frames, String animationName, String skeletonName, int maxX, int maxY) throws Exception {
         if (skeletonName.endsWith(".skel")) 
@@ -287,6 +301,7 @@ public class CreateChibiFrames extends ApplicationAdapter {
         BufferedOutputStream bout = new BufferedOutputStream(fout);
         ZipOutputStream zout = new ZipOutputStream(bout);
         zout.setLevel(Deflater.NO_COMPRESSION);
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
         for (int ii = 0; ii < frames.size(); ++ii) {
             byte[] pixels = frames.get(ii);
             BufferedImage image = new BufferedImage(maxX, maxY, BufferedImage.TYPE_INT_ARGB);    
@@ -302,11 +317,23 @@ public class CreateChibiFrames extends ApplicationAdapter {
             }
             pixels = null;
             frames.set(ii, null);
-            String filePath = String.format("%04d.png", ii);
-            zout.putNextEntry(new ZipEntry(filePath));
             AnimatedGIFWriter writer = new AnimatedGIFWriter(false);
-            writer.prepareForWrite(zout, maxX, maxY);
-            writer.writeFrame(zout, image, Math.round(1000*delta));
+            if (format == Format.GIF) {
+                String filePath = String.format("%04d.gif", ii);
+                zout.putNextEntry(new ZipEntry(filePath));
+                writer.prepareForWrite(zout, maxX, maxY);
+                writer.writeFrame(zout, image, Math.round(1000*delta));                
+            }
+            else { //PNG8
+                String filePath = String.format("%04d.png", ii);
+                zout.putNextEntry(new ZipEntry(filePath));
+                writer.prepareForWrite(baos, maxX, maxY);
+                writer.writeFrame(baos, image, Math.round(1000*delta));
+                ByteArrayInputStream bais = new ByteArrayInputStream(baos.toByteArray());
+                BufferedImage im1 = ImageIO.read(bais);
+                ImageIO.write(im1, "png", zout);
+                bais.close();
+            }
             zout.closeEntry(); 
             image.flush();
             image = null;
@@ -347,17 +374,17 @@ public class CreateChibiFrames extends ApplicationAdapter {
     }
     public static void main(String [] args) {
         CreateChibiFrames anim = new CreateChibiFrames();
-        for (int i = 0; i < args.length; ++i) {
+        for (int i = 0; i < args.length; i += 2) {
             switch (args[i]) {
                 case "-framerate":
-                    anim.delta = 1.0f/Float.parseFloat(args[i + 1]);
+                    anim.delta = 1/Float.parseFloat(args[i + 1]);
                     break;
-                case "-lossy":
-                    anim.lossy = Boolean.parseBoolean(args[i + 1]);
+                case "-format":
+                    anim.format = Format.valueOf(args[i + 1].toUpperCase());
                     break;
             }
         }
-        System.out.println("Framerate = " + (float)Math.round(1.0f/anim.delta) + "\nPNG8 = "+anim.lossy+"; PNG32 = "+!anim.lossy);
+        System.out.println("Framerate = " + Math.round(1/anim.delta) + "\nFormat = "+anim.format);
         LwjglApplicationConfiguration config = new LwjglApplicationConfiguration();
         config.width = (int)(640);
         config.height = (int)(360);
