@@ -1,8 +1,12 @@
 # GirlsFrontline-getChibiFrames
-Create a sequence of transparent png images for each animation from the Girls' Frontline spine files.
+Create a sequence of transparent images for each animation from the Girls' Frontline spine files.
 
-All the chibi animation sequences will be ready to be built as a .gif or any other media file.
+All the extracted chibi animations will be ready to be built as a .gif or any other media file.
 
-**GIF creation example with ImageMagick**
+### GIF creation example with ImageMagick
 
-`convert -delay 5 -dispose Background -loop 0 "*.png" attack.gif`
+`convert -delay (10/3) -dispose Background -loop 0 "*.png" output.gif`
+
+### GIF creation example with FFmpeg
+
+``ffmpeg -v warning -i %04d.png -filter_complex "split [a][b]; [a] palettegen=reserve_transparent=on:transparency_color=ffffff [p]; [b][p] paletteuse, fps=30" output.gif``
