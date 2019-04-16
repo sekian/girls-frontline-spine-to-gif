@@ -15,7 +15,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.zip.Deflater;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
-import javax.imageio.ImageIO;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -23,11 +22,15 @@ import com.badlogic.gdx.backends.lwjgl.LwjglApplication;
 import com.badlogic.gdx.backends.lwjgl.LwjglApplicationConfiguration;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.PixmapIO;
+import com.badlogic.gdx.graphics.PixmapIO.PNG;
 import com.badlogic.gdx.graphics.g2d.PolygonSpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas.TextureAtlasData;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
 
 import com.esotericsoftware.spine.Animation;
@@ -51,28 +54,37 @@ public class CreateChibiFrames extends ApplicationAdapter {
     ThreadPoolExecutor pool;
     CountDownLatch latch;
     int nThreads = 6; //Average number of animations per skeleton
+    boolean lossy = false;
     public void create () {
         long start = System.currentTimeMillis();
         latch = new CountDownLatch(Integer.MAX_VALUE);
         batch = new PolygonSpriteBatch();
         renderer = new SkeletonRenderer();
         renderer.setPremultipliedAlpha(true);
-        FileHandle dirHandle = Gdx.files.absolute("./");        
+        FileHandle dirHandle = Gdx.files.absolute("./");
         FileHandle[] a = dirHandle.list(".skel");
         FileHandle[] b = dirHandle.list(".skel.txt");
         List<FileHandle> directory = new ArrayList<FileHandle>(a.length + b.length);
         directory.addAll(Arrays.asList(a));
-        directory.addAll(Arrays.asList(b));        
+        directory.addAll(Arrays.asList(b));
         File file = new File("_out"); file.mkdirs();
-        //nThreads = Runtime.getRuntime().availableProcessors();
+        nThreads = Runtime.getRuntime().availableProcessors();
         pool = new ThreadPoolExecutor(nThreads, Integer.MAX_VALUE, 10, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
-        for (FileHandle skeletonFile: directory) {
+        System.out.printf("%d files found\nProcessing starts...\n", directory.size());
+        for (int i = 0; i < directory.size(); ++i) {
+            FileHandle skeletonFile = directory.get(i);
             long start2 = System.currentTimeMillis();
-            SkeletonData skeletonData = loadSkeleton(skeletonFile);
+            SkeletonData skeletonData = null;
+            try {
+                skeletonData = loadSkeleton(skeletonFile);
+            } catch (Exception e) {
+                System.out.printf("%4d/%-6d %-5ss    FAILED LOADING %s\n", i + 1, directory.size(),0.0f, skeletonFile.name());
+                //e.printStackTrace();
+                continue;
+            }
             String skeletonName = skeletonFile.nameWithoutExtension();
             if (skeletonName.endsWith(".skel")) skeletonName = skeletonName.substring(0, skeletonName.length() - 5);
             file = new File("_out/" + skeletonName); file.mkdirs();
-            System.out.print(skeletonName+" ");
             for (Animation animation : skeletonData.getAnimations()) {
                 Vector2 min = new Vector2(0,0);
                 Vector2 max = new Vector2(0,0);
@@ -86,22 +98,26 @@ public class CreateChibiFrames extends ApplicationAdapter {
                 min.y = 0;
                 try {
                     int size = pool.getQueue().size();
-                    if (size > 0) {
-                        latch = new CountDownLatch(size - 0);
+                    if (size > nThreads) {
+                        latch = new CountDownLatch(size - nThreads);
                         latch.await(8, TimeUnit.SECONDS);
                     }
                     saveAnimation(min, max, pos, skeletonData, animation);
                 }   catch (Exception e) {e.printStackTrace();}      
             }
             long end2 = System.currentTimeMillis();
-            System.out.print((end2 - start2)/1000.0 + "s\n");
+            System.out.printf("%4d/%-6d %-5ss    %s\n", i + 1, directory.size(),(end2 - start2)/1000.0, skeletonName);
         }
-        pool.shutdown();
+        System.out.println("Waiting for active threads to end...");
+        pool.shutdown();        
         try {
-            while(!pool.awaitTermination(Long.MAX_VALUE, TimeUnit.MINUTES));
+            while(!pool.awaitTermination(Long.MAX_VALUE, TimeUnit.MINUTES)) {
+                latch = new CountDownLatch(pool.getActiveCount());
+                latch.await(4, TimeUnit.SECONDS);
+            }
         } catch (InterruptedException e) {e.printStackTrace();}
         long end = System.currentTimeMillis();
-        System.out.println((end - start)/1000.0 + "s");
+        System.out.println("Uptime " + (end - start)/1000.0 + "s");
         Gdx.app.exit();
     }
     public SkeletonData loadSkeleton (FileHandle skeletonFile) {
@@ -203,7 +219,7 @@ public class CreateChibiFrames extends ApplicationAdapter {
         skeleton.updateWorldTransform();
         AnimationState state = new AnimationState(new AnimationStateData(skeleton.getData()));
         state.getData().setDefaultMix(0.0f);
-        state.setAnimation(0, animation, false); 
+        state.setAnimation(0, animation, false);
         while (!state.getCurrent(0).isComplete()) {
             skeleton.update(delta);
             state.update(delta);
@@ -228,32 +244,35 @@ public class CreateChibiFrames extends ApplicationAdapter {
         skeleton.setToSetupPose();
         skeleton.updateWorldTransform();
         state.getData().setDefaultMix(0.0f);
-        state.setAnimation(0, animation, false);
+        state.setAnimation(0, animation, false);        
+        skeleton.setPosition(pos.x, pos.y);
         int minX = (int)Math.floor(min.x);
         int minY = (int)Math.floor(min.y);
         int maxX = (int)Math.ceil(max.x)-minX;
         int maxY = (int)Math.ceil(max.y)-minY;
-        int size = (int)(state.getCurrent(0).getEndTime()/delta) + 2;        
+        if (Gdx.graphics.getWidth() < maxX || Gdx.graphics.getHeight() < maxY)
+            Gdx.graphics.setWindowedMode(maxX, maxY);
+        int size = (int)(animation.getDuration()/delta) + 2;
         List<byte[]> frames = new ArrayList<byte[]>(size);
         while (!state.getCurrent(0).isComplete()) {
             Gdx.gl.glClearColor(0, 0, 0, 0);
             Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
             state.update(delta);
-            state.apply(skeleton);            
-            skeleton.setPosition(pos.x, pos.y);
+            state.apply(skeleton);
             skeleton.updateWorldTransform();
             batch.begin();
             renderer.draw(batch, skeleton);
             batch.end();
-            byte[] pixels = ScreenUtils.getFrameBufferPixels(minX, minY, maxX, maxY, true);            
+            byte[] pixels = ScreenUtils.getFrameBufferPixels(minX, minY, maxX, maxY, false);            
             frames.add(pixels);
         }
         pool.execute(new Runnable() {
             @Override
                 public void run() {
                     try {
-                        saveWork(frames, animation.getName(), skeletonData.getName(), maxX, maxY);
-                    } catch (IOException e) {
+                        if (lossy) saveWorkLossy(frames, animation.getName(), skeletonData.getName(), maxX, maxY);
+                        else saveWorkLossless(frames, animation.getName(), skeletonData.getName(), maxX, maxY);
+                    } catch (Exception e) {
                         e.printStackTrace();
                     } finally {
                         latch.countDown();
@@ -261,7 +280,7 @@ public class CreateChibiFrames extends ApplicationAdapter {
                 }
             });  
     }
-    public void saveWork(List<byte[]> frames, String animationName, String skeletonName, int maxX, int maxY) throws IOException {   
+    public void saveWorkLossy(List<byte[]> frames, String animationName, String skeletonName, int maxX, int maxY) throws Exception {
         if (skeletonName.endsWith(".skel")) 
             skeletonName = skeletonName.substring(0, skeletonName.length() - 5);        
         FileOutputStream fout = new FileOutputStream("_out/" + skeletonName +"/"+ animationName + ".zip");
@@ -278,14 +297,16 @@ public class CreateChibiFrames extends ApplicationAdapter {
                     int g = pixels[i + 1] & 0xFF;
                     int b = pixels[i + 2] & 0xFF;
                     int a = pixels[i + 3] & 0xFF;
-                    image.setRGB(x, y, (a << 24) | (r << 16) | (g << 8) | b);
+                    image.setRGB(x, maxY - y - 1, (a << 24) | (r << 16) | (g << 8) | b);
                 }
             }
             pixels = null;
             frames.set(ii, null);
-            String filePath = String.format("%04d.gif", ii);
+            String filePath = String.format("%04d.png", ii);
             zout.putNextEntry(new ZipEntry(filePath));
-            ImageIO.write(image, "gif", zout);
+            AnimatedGIFWriter writer = new AnimatedGIFWriter(false);
+            writer.prepareForWrite(zout, maxX, maxY);
+            writer.writeFrame(zout, image, Math.round(1000*delta));
             zout.closeEntry(); 
             image.flush();
             image = null;
@@ -296,10 +317,47 @@ public class CreateChibiFrames extends ApplicationAdapter {
         bout.close();
         fout.close();
     }
+    public void saveWorkLossless(List<byte[]> frames, String animationName, String skeletonName, int maxX, int maxY) throws IOException {
+        if (skeletonName.endsWith(".skel")) 
+            skeletonName = skeletonName.substring(0, skeletonName.length() - 5);        
+        FileOutputStream fout = new FileOutputStream("_out/" + skeletonName +"/"+ animationName + ".zip");
+        BufferedOutputStream bout = new BufferedOutputStream(fout);
+        ZipOutputStream zout = new ZipOutputStream(bout);
+        zout.setLevel(Deflater.NO_COMPRESSION);
+        PNG encoder = new PixmapIO.PNG();
+        encoder.setFlipY(true);
+        encoder.setCompression(Deflater.BEST_SPEED);
+        for (int ii = 0; ii < frames.size(); ++ii) {
+            byte[] pixels = frames.get(ii);
+            Pixmap pixmap = new Pixmap(maxX, maxY, Pixmap.Format.RGBA8888);
+            BufferUtils.copy(pixels, 0, pixmap.getPixels(), pixels.length);
+            pixels = null;
+            frames.set(ii, null);
+            String filePath = String.format("%04d.png", ii);
+            zout.putNextEntry(new ZipEntry(filePath));
+            encoder.write(zout, pixmap);
+            zout.closeEntry(); 
+            pixmap.dispose();
+        }
+        //frames.clear();
+        frames = null;
+        zout.close();
+        bout.close();
+        fout.close();
+    }
     public static void main(String [] args) {
         CreateChibiFrames anim = new CreateChibiFrames();
-        if (args.length >= 1) anim.delta = 1/Float.parseFloat(args[0]);
-        System.out.println(Math.round(1/anim.delta));
+        for (int i = 0; i < args.length; ++i) {
+            switch (args[i]) {
+                case "-framerate":
+                    anim.delta = 1.0f/Float.parseFloat(args[i + 1]);
+                    break;
+                case "-lossy":
+                    anim.lossy = Boolean.parseBoolean(args[i + 1]);
+                    break;
+            }
+        }
+        System.out.println("Framerate = " + (float)Math.round(1.0f/anim.delta) + "\nPNG8 = "+anim.lossy+"; PNG32 = "+!anim.lossy);
         LwjglApplicationConfiguration config = new LwjglApplicationConfiguration();
         config.width = (int)(640);
         config.height = (int)(360);
