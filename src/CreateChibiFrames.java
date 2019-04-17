@@ -353,7 +353,7 @@ public class CreateChibiFrames extends ApplicationAdapter {
         zout.setLevel(Deflater.NO_COMPRESSION);
         PNG encoder = new PixmapIO.PNG();
         encoder.setFlipY(true);
-        encoder.setCompression(Deflater.BEST_SPEED);
+        //encoder.setCompression(Deflater.BEST_SPEED);
         for (int ii = 0; ii < frames.size(); ++ii) {
             byte[] pixels = frames.get(ii);
             Pixmap pixmap = new Pixmap(maxX, maxY, Pixmap.Format.RGBA8888);
