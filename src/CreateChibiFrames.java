@@ -35,8 +35,8 @@ import com.badlogic.gdx.graphics.g2d.TextureAtlas.TextureAtlasData;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.BufferUtils;
+//import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.ScreenUtils;
-
 import com.esotericsoftware.spine.Animation;
 import com.esotericsoftware.spine.AnimationState;
 import com.esotericsoftware.spine.AnimationStateData;
@@ -49,6 +49,7 @@ import com.esotericsoftware.spine.attachments.Attachment;
 import com.esotericsoftware.spine.attachments.MeshAttachment;
 import com.esotericsoftware.spine.attachments.RegionAttachment;
 import com.esotericsoftware.spine.attachments.SkinnedMeshAttachment;
+import com.github.dragon66.AnimatedGIFWriter;
 
 public class CreateChibiFrames extends ApplicationAdapter {
     public enum Format {
@@ -57,8 +58,7 @@ public class CreateChibiFrames extends ApplicationAdapter {
     float delta = 1/30.0f;
     ThreadPoolExecutor pool;
     CountDownLatch latch;
-    int nThreads = 6; //Average number of animations per skeleton
-    Format format = Format.PNG;
+    Format format = Format.PNG;    
     public void create () {
         long start = System.currentTimeMillis();
         latch = new CountDownLatch(Integer.MAX_VALUE);
@@ -69,12 +69,13 @@ public class CreateChibiFrames extends ApplicationAdapter {
         directory.addAll(Arrays.asList(a));
         directory.addAll(Arrays.asList(b));
         File file = new File("_out"); file.mkdirs();
-        nThreads = Runtime.getRuntime().availableProcessors();
+        int nThreads = Runtime.getRuntime().availableProcessors() - 1;
+        nThreads = Math.max(nThreads, 1);
         pool = new ThreadPoolExecutor(nThreads, Integer.MAX_VALUE, 10, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
         System.out.printf("%d files found\nProcessing starts...\n", directory.size());
         for (int i = 0; i < directory.size(); ++i) {
+        	long start2 = System.currentTimeMillis();
             FileHandle skeletonFile = directory.get(i);
-            long start2 = System.currentTimeMillis();
             SkeletonData skeletonData = null;
             try {
                 skeletonData = loadSkeleton(skeletonFile);
@@ -91,8 +92,8 @@ public class CreateChibiFrames extends ApplicationAdapter {
                 Vector2 max = new Vector2(0,0);
                 Vector2 pos = new Vector2(0,0);
                 getAnimationBounds(min, max, skeletonData, animation);
-                pos.x = Math.abs(min.x); 
-                pos.y = Math.abs(min.y); 
+                pos.x = Math.abs(min.x);
+                pos.y = Math.abs(min.y);
                 max.x += Math.abs(min.x);
                 max.y += Math.abs(min.y);
                 min.x = 0;
@@ -148,8 +149,7 @@ public class CreateChibiFrames extends ApplicationAdapter {
         if (!atlasFile.exists() && (atlasFileName.endsWith("A") || atlasFileName.endsWith("B") || atlasFileName.endsWith("C")))
             atlasFile = skeletonFile.sibling(atlasFileName.substring(1, atlasFileName.length() - 1)+ ".atlas");
         if (!atlasFile.exists() && (atlasFileName.endsWith("A") || atlasFileName.endsWith("B") || atlasFileName.endsWith("C")))
-            atlasFile = skeletonFile.sibling(atlasFileName.substring(1, atlasFileName.length() - 1)+ ".atlas.txt");
-        
+            atlasFile = skeletonFile.sibling(atlasFileName.substring(1, atlasFileName.length() - 1)+ ".atlas.txt");        
         TextureAtlasData data = new TextureAtlasData(atlasFile, atlasFile.parent(), false);
         TextureAtlas atlas = new TextureAtlas(data);        
         SkeletonBinary binary = new SkeletonBinary(atlas);
@@ -170,7 +170,6 @@ public class CreateChibiFrames extends ApplicationAdapter {
                 RegionAttachment region = (RegionAttachment)attachment;
                 region.updateWorldVertices(slot, false);
                 vertices1 = region.getWorldVertices();
-
             } else if (attachment instanceof MeshAttachment) {
                 MeshAttachment mesh = (MeshAttachment)attachment;
                 mesh.updateWorldVertices(slot, true);
@@ -227,7 +226,8 @@ public class CreateChibiFrames extends ApplicationAdapter {
             state.apply(skeleton);
             skeleton.setPosition(0, 0);
             skeleton.updateWorldTransform();
-            getBounds(min, max, skeleton);    
+            //getBounds(min, max, skeleton);
+            skeleton.getBounds(min, max);
             maxX = Math.max(maxX, max.x+min.x); //Cancel the substracted min returned from getBounds
             maxY = Math.max(maxY, max.y+min.y); //because we want the absolute max value (not the distance)
             minX = Math.min(minX, min.x);
@@ -235,12 +235,10 @@ public class CreateChibiFrames extends ApplicationAdapter {
         }
         min.set(minX, minY);
         max.set(maxX, maxY);
-        //System.out.println(minX +" "+ minY);
-        //System.out.println(maxX +" "+ maxY);
+        //System.out.println(min +" "+ min);
     }
-    public void saveAnimation (Vector2 min, Vector2 max, Vector2 pos, SkeletonData skeletonData, Animation animation) throws Exception {
+    public void saveAnimation(Vector2 min, Vector2 max, Vector2 pos, SkeletonData skeletonData, Animation animation) throws Exception {
         AnimationState state = new AnimationState(new AnimationStateData(skeletonData));
-        renderer.setPremultipliedAlpha(true);
         Skeleton skeleton = new Skeleton(skeletonData);
         skeleton.setToSetupPose();
         skeleton.updateWorldTransform();
@@ -387,8 +385,8 @@ public class CreateChibiFrames extends ApplicationAdapter {
         }
         System.out.println("Framerate = " + Math.round(1/anim.delta) + "\nFormat = "+anim.format);
         LwjglApplicationConfiguration config = new LwjglApplicationConfiguration();
-        config.width = (int)(640);
-        config.height = (int)(360);
+        config.width = (int)(0);
+        config.height = (int)(0);
         new LwjglApplication(anim, config);
     }
 }
