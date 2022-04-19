@@ -54,10 +54,7 @@ public class CreateChibiFrames extends ApplicationAdapter {
     public enum Format {
         PNG, PNG8, PNG32, GIF
     }
-    SkeletonRenderer renderer;
-    AnimationState state;
     float delta = 1/30.0f;
-    PolygonSpriteBatch batch;
     ThreadPoolExecutor pool;
     CountDownLatch latch;
     int nThreads = 6; //Average number of animations per skeleton
@@ -65,9 +62,6 @@ public class CreateChibiFrames extends ApplicationAdapter {
     public void create () {
         long start = System.currentTimeMillis();
         latch = new CountDownLatch(Integer.MAX_VALUE);
-        batch = new PolygonSpriteBatch();
-        renderer = new SkeletonRenderer();
-        renderer.setPremultipliedAlpha(true);
         FileHandle dirHandle = Gdx.files.absolute("./");
         FileHandle[] a = dirHandle.list(".skel");
         FileHandle[] b = dirHandle.list(".skel.txt");
@@ -257,10 +251,17 @@ public class CreateChibiFrames extends ApplicationAdapter {
         int minY = (int)Math.floor(min.y);
         int maxX = (int)Math.ceil(max.x)-minX;
         int maxY = (int)Math.ceil(max.y)-minY;
-        if (Gdx.graphics.getWidth() < maxX || Gdx.graphics.getHeight() < maxY)
-            Gdx.graphics.setWindowedMode(maxX, maxY);
+        //System.out.println(min +" "+ pos + " " + max);
+        if (Gdx.graphics.getWidth() < maxX || Gdx.graphics.getHeight() < maxY) {
+        	int new_sizeX = Math.max(maxX, Gdx.graphics.getWidth());
+        	int new_sizeY = Math.max(maxY, Gdx.graphics.getHeight());
+        	Gdx.graphics.setWindowedMode(new_sizeX, new_sizeY);
+        }
         int size = (int)(animation.getDuration()/delta) + 2;
         List<byte[]> frames = new ArrayList<byte[]>(size);
+        SkeletonRenderer renderer = new SkeletonRenderer();
+        PolygonSpriteBatch batch = new PolygonSpriteBatch();
+        renderer.setPremultipliedAlpha(true);
         while (!state.getCurrent(0).isComplete()) {
             Gdx.gl.glClearColor(0, 0, 0, 0);
             Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
